@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Syncthing A",
+    "baseUrl": "http://127.0.0.1:8384/",
+    "apiKey": "YOUR_API_KEY_HERE"
+  },
+  {
+    "name": "Syncthing B",
+    "baseUrl": "http://192.168.1.50:8384/",
+    "apiKey": "YOUR_API_KEY_HERE"
+  }
+]
+
+

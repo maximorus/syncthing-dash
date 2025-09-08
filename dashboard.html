@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Syncthing Dashboard</title>
+    <style>
+      :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color-scheme: light dark; }
+      body { margin: 0; padding: 24px; }
+      h1 { margin: 0 0 16px; font-size: 20px; }
+      .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+      button { padding: 6px 10px; cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 10px; border-bottom: 1px solid #ccc; text-align: left; vertical-align: top; }
+      th { background: rgba(0,0,0,0.05); position: sticky; top: 0; }
+      .status-ok { color: #0a7f2e; font-weight: 600; }
+      .status-bad { color: #b00020; font-weight: 600; }
+      .muted { opacity: 0.7; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .error-list { margin: 0; padding-left: 18px; }
+      .list-reset { margin: 0; padding-left: 18px; list-style: none; }
+      .folder-list li, .lastfile-list li { margin: 0 0 8px 0; }
+      .peer-list { margin-top: 4px; }
+      th, td { position: relative; }
+      th { user-select: none; }
+      .resize-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 4px; cursor: col-resize; background: transparent; }
+      .resize-handle:hover { background: #007acc; }
+      .column-toggle { position: relative; display: inline-block; }
+      .column-menu { position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 150px; }
+      .column-menu label { display: block; margin: 4px 0; cursor: pointer; color: #333; }
+      .column-menu input[type="checkbox"] { margin-right: 8px; }
+      .hidden-column { display: none !important; }
+      @media (prefers-color-scheme: dark) {
+        .column-menu { background: #2d2d2d; border-color: #555; color: #fff; }
+        .column-menu label { color: #fff; }
+      }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+      .dot.green { background: #0a7f2e; }
+      .dot.gray { background: #888; }
+      .dot.red { background: #b00020; }
+      .dot.yellow { background: #f1c40f; }
+      .dot.darkyellow { background: #b8860b; }
+      .dot.blue { background: #007acc; }
+      .dot.violetgreen { background: linear-gradient(90deg, #8e44ad, #2ecc71); }
+      .progress { position: relative; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; display: inline-block; width: 120px; margin: 0 8px; vertical-align: middle; }
+      .progress .fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #4caf50, #2e7d32); }
+      .progress .fill.syncing { background: linear-gradient(90deg, #8e44ad, #2ecc71); }
+      .progress .fill.waiting { background: linear-gradient(90deg, #b8860b, #8b6914); }
+      .progress .fill.scanning { background: linear-gradient(90deg, #007acc, #0056b3); }
+      .progress .fill.error { background: linear-gradient(90deg, #b00020, #8b0015); }
+      .state-badge { display: inline-block; padding: 2px 6px; border-radius: 10px; font-size: 12px; margin-left: 6px; }
+      .state-scanning { background: #fff3cd; color: #7a5b00; }
+      .state-syncing { background: #e3f2fd; color: #0b5394; }
+      .state-idle { background: #e8f5e9; color: #1b5e20; }
+      .state-unknown { background: #f5f5f5; color: #616161; }
+      .host-toggle { background: #007acc; color: white; border: none; border-radius: 4px; }
+      .host-toggle.excluded { background: #b00020; }
+    </style>
+  </head>
+  <body>
+    <h1>Syncthing Dashboard</h1>
+
+    <div class="toolbar">
+      <button id="refreshBtn">Refresh</button>
+      <a class="muted" href="/print.html" target="_blank" rel="noopener noreferrer">Export (printable)</a>
+      <button id="toggleHostsBtn" class="host-toggle">Include All Hosts</button>
+      <label class="muted">Auto-refresh <input type="checkbox" id="autoRefresh" checked> <span id="intervalLabel">15s</span></label>
+      <input type="range" id="interval" min="5" max="60" step="5" value="15" style="width:160px">
+      <span id="lastUpdated" class="muted"></span>
+      <div class="column-toggle">
+        <button id="toggleColumnsBtn">Toggle Columns</button>
+        <div id="columnMenu" class="column-menu" style="display: none;">
+          <label><input type="checkbox" data-column="0" checked> Node</label>
+          <label><input type="checkbox" data-column="1"> Status</label>
+          <label><input type="checkbox" data-column="2" checked> Transfer Errors</label>
+          <label><input type="checkbox" data-column="3"> Shares</label>
+          <label><input type="checkbox" data-column="4" checked> Folders</label>
+          <label><input type="checkbox" data-column="5" checked> Latest Change</label>
+          <label><input type="checkbox" data-column="6" checked> Per-Device Folders</label>
+          <label><input type="checkbox" data-column="7" checked> Devices</label>
+          <label><input type="checkbox" data-column="8"> Paused Folders</label>
+          <label><input type="checkbox" data-column="9"> Out-of-sync Items</label>
+        </div>
+      </div>
+    </div>
+
+    <table id="mainTable">
+      <thead>
+        <tr>
+          <th>Node<div class="resize-handle"></div></th>
+          <th>Status<div class="resize-handle"></div></th>
+          <th>Transfer Errors<div class="resize-handle"></div></th>
+          <th>Shares<div class="resize-handle"></div></th>
+          <th>Folders<div class="resize-handle"></div></th>
+          <th>Latest Change<div class="resize-handle"></div></th>
+          <th>Per-Device Folders<div class="resize-handle"></div></th>
+          <th>Devices<div class="resize-handle"></div></th>
+          <th>Paused Folders<div class="resize-handle"></div></th>
+          <th>Out-of-sync Items<div class="resize-handle"></div></th>
+        </tr>
+      </thead>
+      <tbody id="nodesBody"></tbody>
+    </table>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+  </html>
+
+
