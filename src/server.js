@@ -2,6 +2,32 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { setMaxListeners } from 'events';
+
+// Fix MaxListenersExceeded warning by increasing the limit
+setMaxListeners(0, process); // 0 means unlimited
+
+// Global AbortController pool to reuse controllers
+const controllerPool = [];
+const MAX_POOL_SIZE = 10;
+
+// Request throttling to reduce frequency
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 2000; // 2 seconds minimum between requests
+
+function getAbortController() {
+  if (controllerPool.length > 0) {
+    return controllerPool.pop();
+  }
+  const controller = new AbortController();
+  return controller;
+}
+
+function returnAbortController(controller) {
+  if (controllerPool.length < MAX_POOL_SIZE) {
+    controllerPool.push(controller);
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -141,7 +167,7 @@ app.get('/api/nodes', async (req, res) => {
   }
 
   // Concurrently query instances
-  const controller = new AbortController();
+  const controller = getAbortController();
   const timeoutMs = Number(process.env.SYNC_TIMEOUT_MS || 10000); // Increased to 10 seconds
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -510,8 +536,11 @@ app.get('/api/nodes', async (req, res) => {
           }));
           node.folders = folderStatuses.filter(Boolean);
 
-          // Aggregate out-of-sync items
-          node.outOfSyncItems = node.folders.reduce((sum, f) => sum + (Number.isFinite(f.needItems) ? f.needItems : 0), 0);
+          // Aggregate out-of-sync items (check peers' needItems, not folder's needItems)
+          node.outOfSyncItems = node.folders.reduce((sum, f) => {
+            const peerNeedItems = f.peers.reduce((peerSum, p) => peerSum + (Number.isFinite(p.items?.needItems) ? p.items.needItems : 0), 0);
+            return sum + peerNeedItems;
+          }, 0);
 
           // Per-device folders as object
           const perDevice = {};
@@ -540,6 +569,7 @@ app.get('/api/nodes', async (req, res) => {
     res.status(504).json({ nodes: [], error: isAbort ? 'Request timed out' : (e?.message || 'Unknown error') });
   } finally {
     clearTimeout(timeout);
+    returnAbortController(controller);
   }
 });
 
@@ -617,3 +647,91 @@ app.listen(PORT, HOST, () => {
 });
 
 
+// Out-of-sync items API endpoint
+app.get('/api/outofsync', async (req, res) => {
+  const instances = loadInstancesConfig();
+  if (!instances.length) {
+    return res.status(200).json({ items: [], error: 'No instances configured' });
+  }
+
+  const outOfSyncItems = [];
+  console.log("Out-of-sync API called");
+  
+  try {
+    const results = await Promise.all(instances.map(async (instance) => {
+      try {
+        // Get folder configurations
+        const folders = await fetchFromSyncthing(instance.baseUrl, instance.apiKey, '/rest/config/folders');
+        if (!folders) return [];
+        
+        const nodeOutOfSyncItems = [];
+        
+        for (const folder of folders) {
+          const folderId = folder.id;
+          const folderLabel = folder.label || folderId;
+          
+          try {
+            // Get folder status to find peer data with out-of-sync items
+            const folderStatus = await fetchFromSyncthing(instance.baseUrl, instance.apiKey, `/rest/db/status?folder=${encodeURIComponent(folderId)}`);
+            if (!folderStatus) continue;
+            
+            // Get device configurations to map device IDs to names
+            const devices = await fetchFromSyncthing(instance.baseUrl, instance.apiKey, '/rest/config/devices');
+            
+            // Check if there are any out-of-sync items in the folder status
+            if (folderStatus.needTotalItems && folderStatus.needTotalItems > 0) {
+              nodeOutOfSyncItems.push({
+                node: instance.name,
+                folder: folderLabel,
+                path: `[${folderStatus.needTotalItems} items]`,
+                reason: `Local folder needs ${folderStatus.needTotalItems} items (${folderStatus.needBytes || 0} bytes)`,
+                size: folderStatus.needBytes || 0,
+                modified: folderStatus.stateChanged || null
+              });
+            }
+            
+            // Also check remote sequences for out-of-sync items
+            if (folderStatus.remoteSequence) {
+              for (const [deviceId, remoteSeq] of Object.entries(folderStatus.remoteSequence)) {
+                const localSeq = folderStatus.sequence || 0;
+                if (remoteSeq < localSeq) {
+                  const device = devices?.find(d => d.deviceID === deviceId);
+                  const deviceName = device?.name || deviceId;
+                  const itemsBehind = localSeq - remoteSeq;
+                  
+                  nodeOutOfSyncItems.push({
+                    node: instance.name,
+                    folder: folderLabel,
+                    path: `[${itemsBehind} items behind]`,
+                    reason: `Device ${deviceName} is ${itemsBehind} items behind local sequence`,
+                    size: 0,
+                    modified: folderStatus.stateChanged || null
+                  });
+                }
+              }
+            }
+          } catch (folderError) {
+            console.error(`Failed to get out-of-sync items for folder ${folderId} on ${instance.name}:`, folderError.message);
+          }
+        }
+        
+        return nodeOutOfSyncItems;
+      } catch (error) {
+        console.error(`Failed to get out-of-sync items for ${instance.name}:`, error.message);
+        return [];
+      }
+    }));
+    
+    // Return data per node
+    const nodesData = {};
+    results.forEach((items, index) => {
+      const nodeName = instances[index].name;
+      nodesData[nodeName] = items;
+    });
+    
+    res.json({ nodes: nodesData });
+  } catch (error) {
+    console.error('Error fetching out-of-sync items:', error);
+    res.status(500).json({ items: [], error: error.message });
+  }
+});

@@ -44,7 +44,7 @@
     <script type="module">
       function fmtPct(n){ if(n==null||isNaN(n))return '—%'; return Math.round(Number(n))+'%'; }
       async function load(){
-        const res = await fetch('/api/nodes');
+        const res = await fetch('api/nodes');
         const { nodes } = await res.json();
         document.getElementById('updated').textContent = 'Updated: ' + new Date().toLocaleString();
         const tbody = document.getElementById('tbody');

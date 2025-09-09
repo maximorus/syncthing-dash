@@ -30,10 +30,6 @@
       .column-menu label { display: block; margin: 4px 0; cursor: pointer; color: #333; }
       .column-menu input[type="checkbox"] { margin-right: 8px; }
       
-      .host-toggle { position: relative; display: inline-block; }
-      .host-menu { position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 150px; }
-      .host-menu label { display: block; margin: 4px 0; cursor: pointer; color: #333; }
-      .host-menu input[type="checkbox"] { margin-right: 8px; }
       
       .data-toggle { position: relative; display: inline-block; }
       .data-menu { position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 200px; }
@@ -67,25 +63,19 @@
       .state-syncing { background: #e3f2fd; color: #0b5394; }
       .state-idle { background: #e8f5e9; color: #1b5e20; }
       .state-unknown { background: #f5f5f5; color: #616161; }
-      .host-toggle { background: #007acc; color: white; border: none; border-radius: 4px; }
-      .host-toggle.excluded { background: #b00020; }
+      .host-toggle-btn { background: #28a745; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer; margin-left: 8px; }
+      .host-toggle-btn.off { background: #dc3545; }
+      .host-toggle-btn:hover { opacity: 0.8; }
+      #hostButtons { margin-left: 16px; }
+      #hostButtons .host-toggle-btn { margin-left: 4px; }
     </style>
   </head>
   <body>
-    <h1>Syncthing Dashboard</h1>
+    <h1>Syncthing Dashboard <span id="hostButtons"></span></h1>
 
     <div class="toolbar">
       <button id="refreshBtn">Refresh</button>
-      <a class="muted" href="/print.html" target="_blank" rel="noopener noreferrer">Export (printable)</a>
-      <div class="host-toggle">
-        <button id="toggleHostsBtn">Filter Hosts</button>
-        <div id="hostMenu" class="host-menu" style="display: none;">
-          <label><input type="checkbox" data-host="all" checked> Show All Hosts</label>
-          <label><input type="checkbox" data-host="local" checked> Local Hosts</label>
-          <label><input type="checkbox" data-host="remote" checked> Remote Hosts</label>
-          <label><input type="checkbox" data-host="localhost" checked> Localhost Only</label>
-        </div>
-      </div>
+      <a class="muted" href="print.html" target="_blank" rel="noopener noreferrer">Export (printable)</a>
       <div class="data-toggle">
         <button id="toggleDataBtn">Toggle Data</button>
         <div id="dataMenu" class="data-menu" style="display: none;">
@@ -103,7 +93,7 @@
         <button id="toggleColumnsBtn">Toggle Columns</button>
         <div id="columnMenu" class="column-menu" style="display: none;">
           <label><input type="checkbox" data-column="0" checked> Node</label>
-          <label><input type="checkbox" data-column="1"> Status</label>
+          <label><input type="checkbox" data-column="1" checked> Status & Sync</label>
           <label><input type="checkbox" data-column="2" checked> Transfer Errors</label>
           <label><input type="checkbox" data-column="3"> Shares</label>
           <label><input type="checkbox" data-column="4" checked> Folders</label>
@@ -111,7 +101,6 @@
           <label><input type="checkbox" data-column="6" checked> Per-Device Folders</label>
           <label><input type="checkbox" data-column="7" checked> Devices</label>
           <label><input type="checkbox" data-column="8"> Paused Folders</label>
-          <label><input type="checkbox" data-column="9"> Out-of-sync Items</label>
         </div>
       </div>
     </div>
@@ -120,7 +109,7 @@
       <thead>
         <tr>
           <th>Node<div class="resize-handle"></div></th>
-          <th>Status<div class="resize-handle"></div></th>
+          <th>Status & Sync<div class="resize-handle"></div></th>
           <th>Transfer Errors<div class="resize-handle"></div></th>
           <th>Shares<div class="resize-handle"></div></th>
           <th>Folders<div class="resize-handle"></div></th>
@@ -128,13 +117,12 @@
           <th>Per-Device Folders<div class="resize-handle"></div></th>
           <th>Devices<div class="resize-handle"></div></th>
           <th>Paused Folders<div class="resize-handle"></div></th>
-          <th>Out-of-sync Items<div class="resize-handle"></div></th>
         </tr>
       </thead>
       <tbody id="nodesBody"></tbody>
     </table>
 
-    <script src="/app.js" type="module"></script>
+    <script src="app.js" type="module"></script>
   </body>
   </html>
 

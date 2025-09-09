@@ -97,9 +97,28 @@ async function fetchNodes() {
   if (!res.ok) throw new Error(`Failed to fetch nodes: ${res.status}`);
   const data = await res.json();
   
-  return data;
+  // Filter nodes client-side based on hostFilters
+  console.log("fetchNodes called with hostFilters:", hostFilters);
+  
+  if (hostFilters.all) {
+    console.log("Showing all hosts (all filter is true)");
+    return data; // Return all nodes
+  } else {
+    // Filter to only show selected hosts
+    const enabledHosts = Object.entries(hostFilters).filter(([key, value]) => value && key !== "all");
+    console.log("Enabled individual hosts (excluding all):", enabledHosts);
+    
+    if (enabledHosts.length === 0) {
+      console.log("No hosts selected, returning empty result");
+      return { nodes: [] };
+    } else {
+      const selectedHostNames = enabledHosts.map(([hostName, enabled]) => hostName);
+      const filteredNodes = data.nodes.filter(node => selectedHostNames.includes(node.name));
+      console.log(`Filtered ${data.nodes.length} nodes to ${filteredNodes.length} nodes`);
+      return { ...data, nodes: filteredNodes };
+    }
+  }
 }
-
 function render(nodes) {
   const tbody = document.getElementById('nodesBody');
   tbody.innerHTML = '';
@@ -358,18 +377,11 @@ function render(nodes) {
   // Reapply column visibility after rendering
   reapplyColumnVisibility();
   
+  // Populate host menu with individual host names
+  populateHostMenu(nodes);
   
   // Add event listeners for pause/resume buttons
   setupPauseResumeButtons();
-  
-  // Create host buttons in header
-  createHostButtons(nodes);
-  
-  // Add event listeners for host toggle buttons (after buttons are created)
-  setupHostToggleButtons();
-  
-  // Apply saved host visibility state
-  applyHostVisibility();
 }
 
 async function refresh() {
@@ -388,31 +400,42 @@ document.getElementById('refreshBtn').addEventListener('click', refresh);
 const intervalSlider = document.getElementById('interval');
 const intervalLabel = document.getElementById('intervalLabel');
 const autoRefresh = document.getElementById('autoRefresh');
+const toggleHostsBtn = document.getElementById('toggleHostsBtn');
 
+let hostFilters = {
+  all: true
+}; // Track which individual hosts are enabled
 
-let hostVisibility = {}; // Track which hosts are visible
-const HOST_VISIBILITY_KEY = 'syncthing-dashboard-host-visibility';
+let availableHosts = []; // Will be populated with actual host names
 
-// Save host visibility state to localStorage
-function saveHostVisibility() {
-  try {
-    localStorage.setItem(HOST_VISIBILITY_KEY, JSON.stringify(hostVisibility));
-  } catch (error) {
-    console.warn('Failed to save host visibility state:', error);
-  }
-}
-
-// Load host visibility state from localStorage
-function loadHostVisibility() {
-  try {
-    const saved = localStorage.getItem(HOST_VISIBILITY_KEY);
-    if (saved) {
-      hostVisibility = JSON.parse(saved);
+// Function to populate host menu with individual hosts
+function populateHostMenu(hosts) {
+  const hostMenu = document.getElementById("hostMenu");
+  const allCheckbox = hostMenu.querySelector("input[data-host=\"all\"]");
+  
+  // Clear existing host checkboxes (keep the "all" checkbox)
+  const existingHosts = hostMenu.querySelectorAll("input[data-host]:not([data-host=\"all\"])");
+  existingHosts.forEach(cb => cb.parentElement.remove());
+  
+  // Add checkboxes for each host
+  hosts.forEach(host => {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.setAttribute("data-host", host.name);
+    checkbox.checked = hostFilters.all || hostFilters[host.name] === true;
+    
+    // Initialize host filter if not exists
+    if (!(host.name in hostFilters)) {
+      hostFilters[host.name] = hostFilters.all;
     }
-  } catch (error) {
-    console.warn('Failed to load host visibility state:', error);
-    hostVisibility = {};
-  }
+    
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(` ${host.name}`));
+    hostMenu.appendChild(label);
+  });
+  
+  availableHosts = hosts;
 }
 
 let dataFilters = {
@@ -441,10 +464,103 @@ function setupAutoRefresh() {
 autoRefresh.addEventListener('change', setupAutoRefresh);
 intervalSlider.addEventListener('change', setupAutoRefresh);
 
+// Host filtering functionality with checkboxes
+const hostMenu = document.getElementById('hostMenu');
 
 // Data toggle functionality with checkboxes
 const toggleDataBtn = document.getElementById('toggleDataBtn');
 const dataMenu = document.getElementById('dataMenu');
+
+// Toggle host menu visibility
+toggleHostsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const isVisible = hostMenu.style.display !== 'none';
+  hostMenu.style.display = isVisible ? 'none' : 'block';
+  updateHostButtonText();
+});
+
+// Close menu when clicking outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.host-toggle')) {
+    hostMenu.style.display = 'none';
+  }
+  if (!e.target.closest('.data-toggle')) {
+    dataMenu.style.display = 'none';
+  }
+});
+
+// Handle checkbox changes
+hostMenu.addEventListener('change', async (e) => {
+  if (e.target.type === 'checkbox') {
+    const hostType = e.target.getAttribute('data-host');
+    console.log('Checkbox changed:', hostType, 'checked:', e.target.checked);
+    
+    // Handle "all" checkbox logic
+    if (hostType === 'all') {
+      if (e.target.checked) {
+        // If "all" is checked, uncheck all others
+        hostMenu.querySelectorAll('input[type="checkbox"]:not([data-host="all"])').forEach(cb => {
+          cb.checked = false;
+          hostFilters[cb.getAttribute('data-host')] = false;
+        });
+        hostFilters.all = true;
+      } else {
+        // If "all" is unchecked, don't auto-check anything
+        hostFilters.all = false;
+      }
+    } else {
+      // If any specific filter is checked, uncheck "all"
+      if (e.target.checked) {
+        const allCheckbox = hostMenu.querySelector('input[data-host="all"]');
+        allCheckbox.checked = false;
+        hostFilters.all = false;
+      }
+      hostFilters[hostType] = e.target.checked;
+      
+      // If no specific filters are checked, check "all"
+      const specificFilters = hostMenu.querySelectorAll('input[type="checkbox"]:not([data-host="all"])');
+      const checkedSpecific = Array.from(specificFilters).some(cb => cb.checked);
+      if (!checkedSpecific) {
+        const allCheckbox = hostMenu.querySelector('input[data-host="all"]');
+        allCheckbox.checked = true;
+        hostFilters.all = true;
+      }
+    }
+    
+    console.log('Updated hostFilters:', hostFilters);
+    updateHostButtonText();
+    
+    // Refresh data
+    try {
+      await refresh();
+      const nodes = await fetchNodes();
+      showToast(`Showing ${nodes.length} host(s)`);
+    } catch (error) {
+      console.error('Failed to refresh after host filter change:', error);
+      showToast('Failed to refresh data');
+    }
+  }
+});
+
+function updateHostButtonText() {
+  const enabledFilters = Object.entries(hostFilters).filter(([key, value]) => value && key !== 'all');
+  
+  if (hostFilters.all) {
+    toggleHostsBtn.textContent = 'Filter Hosts (All)';
+    toggleHostsBtn.classList.remove('excluded');
+  } else if (enabledFilters.length === 0) {
+    toggleHostsBtn.textContent = 'Filter Hosts (None)';
+    toggleHostsBtn.classList.add('excluded');
+  } else if (enabledFilters.length === 1) {
+    const filterName = enabledFilters[0][0];
+    const displayName = enabledFilters[0][0];
+    toggleHostsBtn.textContent = `Filter Hosts (${displayName})`;
+    toggleHostsBtn.classList.add('excluded');
+  } else {
+    toggleHostsBtn.textContent = `Filter Hosts (${enabledFilters.length} hosts)`;
+    toggleHostsBtn.classList.add('excluded');
+  }
+}
 
 // Toggle data menu visibility
 toggleDataBtn.addEventListener('click', (e) => {
@@ -454,19 +570,13 @@ toggleDataBtn.addEventListener('click', (e) => {
   updateDataButtonText();
 });
 
-// Close data menu when clicking outside
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.data-toggle')) {
-    dataMenu.style.display = 'none';
-  }
-});
-
 // Handle data checkbox changes
 dataMenu.addEventListener('change', async (e) => {
   if (e.target.type === 'checkbox') {
     const dataType = e.target.getAttribute('data-data');
     dataFilters[dataType] = e.target.checked;
     
+    console.log('Data filter changed:', dataType, 'checked:', e.target.checked);
     console.log('Updated dataFilters:', dataFilters);
     
     updateDataButtonText();
@@ -551,91 +661,6 @@ function setupColumnResizing() {
 function setupPauseResumeButtons() {
   // Device pause/resume buttons have been removed as they don't work
   // This function is kept for potential future use
-}
-
-// Create host buttons in the header
-function createHostButtons(nodes) {
-  const hostButtonsContainer = document.getElementById('hostButtons');
-  if (!hostButtonsContainer) {
-    console.error('hostButtons container not found');
-    return;
-  }
-  
-  hostButtonsContainer.innerHTML = '';
-  console.log('Creating host buttons for', nodes.length, 'nodes');
-  
-  nodes.forEach(node => {
-    // Initialize host visibility if not set
-    if (!(node.name in hostVisibility)) {
-      hostVisibility[node.name] = true;
-    }
-    
-    const button = document.createElement('button');
-    button.className = `host-toggle-btn ${hostVisibility[node.name] ? '' : 'off'}`;
-    button.setAttribute('data-host', node.name);
-    button.textContent = hostVisibility[node.name] ? 'ON' : 'OFF';
-    button.title = `Toggle ${node.name} visibility`;
-    
-    hostButtonsContainer.appendChild(button);
-    console.log('Created button for', node.name);
-  });
-  
-  // Force a re-render to make sure buttons are visible
-  hostButtonsContainer.style.display = 'inline-block';
-}
-
-// Apply saved host visibility state to table rows
-function applyHostVisibility() {
-  const rows = document.querySelectorAll('tbody tr');
-  rows.forEach(row => {
-    const nameCell = row.querySelector('td:first-child');
-    if (nameCell) {
-      const hostName = nameCell.textContent;
-      if (hostName in hostVisibility) {
-        row.style.display = hostVisibility[hostName] ? '' : 'none';
-      }
-    }
-  });
-}
-
-// Setup host toggle button event listeners
-function setupHostToggleButtons() {
-  const hostToggleButtons = document.querySelectorAll('.host-toggle-btn');
-  console.log('Setting up event listeners for', hostToggleButtons.length, 'host toggle buttons');
-  
-  hostToggleButtons.forEach(button => {
-    button.addEventListener('click', async (e) => {
-      e.preventDefault();
-      const hostName = button.getAttribute('data-host');
-      console.log('Host toggle button clicked for:', hostName);
-      
-      // Toggle host visibility
-      hostVisibility[hostName] = !hostVisibility[hostName];
-      
-      // Update button appearance
-      if (hostVisibility[hostName]) {
-        button.textContent = 'ON';
-        button.classList.remove('off');
-      } else {
-        button.textContent = 'OFF';
-        button.classList.add('off');
-      }
-      
-      // Hide/show all rows for this host
-      const rows = document.querySelectorAll('tbody tr');
-      rows.forEach(row => {
-        const nameCell = row.querySelector('td:first-child');
-        if (nameCell && nameCell.textContent === hostName) {
-          row.style.display = hostVisibility[hostName] ? '' : 'none';
-        }
-      });
-      
-      // Save state to localStorage
-      saveHostVisibility();
-      
-      showToast(`${hostName} ${hostVisibility[hostName] ? 'enabled' : 'disabled'}`);
-    });
-  });
 }
 
 // Global function to reapply column visibility (called after render)
@@ -780,7 +805,7 @@ function setupColumnVisibility() {
 }
 
 // initial load
-loadHostVisibility(); // Load saved host visibility state
+updateHostButtonText();
 updateDataButtonText();
 refresh();
 setupAutoRefresh();

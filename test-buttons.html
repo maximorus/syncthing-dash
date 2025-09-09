@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Host Buttons</title>
+    <style>
+        .host-toggle-btn { background: #28a745; color: white; border: none; border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer; margin-left: 8px; }
+        .host-toggle-btn.off { background: #dc3545; }
+        #hostButtons { margin-left: 16px; }
+    </style>
+</head>
+<body>
+    <h1>Test <span id="hostButtons"></span></h1>
+    
+    <script>
+        // Test data
+        const nodes = [
+            { name: "E6430" },
+            { name: "JLIT-ant17" }
+        ];
+        
+        let hostVisibility = {};
+        
+        function createHostButtons(nodes) {
+            const hostButtonsContainer = document.getElementById('hostButtons');
+            if (!hostButtonsContainer) {
+                console.error('hostButtons container not found');
+                return;
+            }
+            
+            hostButtonsContainer.innerHTML = '';
+            console.log('Creating host buttons for', nodes.length, 'nodes');
+            
+            nodes.forEach(node => {
+                if (!(node.name in hostVisibility)) {
+                    hostVisibility[node.name] = true;
+                }
+                
+                const button = document.createElement('button');
+                button.className = `host-toggle-btn ${hostVisibility[node.name] ? '' : 'off'}`;
+                button.setAttribute('data-host', node.name);
+                button.textContent = hostVisibility[node.name] ? 'ON' : 'OFF';
+                button.title = `Toggle ${node.name} visibility`;
+                
+                hostButtonsContainer.appendChild(button);
+                console.log('Created button for', node.name);
+            });
+        }
+        
+        // Create buttons when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            createHostButtons(nodes);
+        });
+    </script>
+</body>
+</html>

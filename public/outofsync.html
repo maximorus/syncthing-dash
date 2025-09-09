@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Out-of-Sync Items - Syncthing Dashboard</title>
+    <style>
+      :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji"; color-scheme: light dark; }
+
+      body { margin: 0; padding: 24px; }
+      h1 { margin: 0 0 16px; font-size: 20px; }
+      .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+      .muted { color: #6c757d; text-decoration: none; }
+      .muted:hover { text-decoration: underline; }
+
+      table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+      th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+      th { background-color: #f8f9fa; font-weight: 600; }
+      tr:nth-child(even) { background-color: #f8f9fa; }
+      
+      .status-bad { color: #dc3545; font-weight: 600; }
+      .status-warning { color: #fd7e14; font-weight: 600; }
+      .status-info { color: #0dcaf0; font-weight: 600; }
+      
+      .file-path { font-family: monospace; font-size: 0.9em; }
+      .reason { max-width: 300px; word-wrap: break-word; }
+      .node-name { font-weight: 600; }
+      
+      .loading { text-align: center; padding: 20px; color: #6c757d; }
+      .error { color: #dc3545; padding: 12px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; margin: 12px 0; }
+      
+      .refresh-btn { background: #007acc; color: white; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; }
+      .refresh-btn:hover { background: #005a9e; }
+      
+      .back-link { display: inline-block; margin-bottom: 16px; color: #007acc; text-decoration: none; }
+      .back-link:hover { text-decoration: underline; }
+      
+      .summary { background: #e7f3ff; border: 1px solid #b3d9ff; border-radius: 4px; padding: 12px; margin-bottom: 16px; }
+      .summary h3 { margin: 0 0 8px; color: #0066cc; }
+      .summary p { margin: 4px 0; }
+
+      @media (prefers-color-scheme: dark) {
+        body { background: #1a1a1a; color: #e0e0e0; }
+        th { background-color: #2d2d2d; border-color: #444; }
+        tr:nth-child(even) { background-color: #2d2d2d; }
+        td { border-color: #444; }
+        .summary { background: #1a2332; border-color: #3a4a5c; }
+        .summary h3 { color: #4a9eff; }
+        .error { background: #3d1a1a; border-color: #5c2626; }
+      }
+    </style>
+  </head>
+  <body>
+    <a href="index.html" class="back-link">← Back to Dashboard</a>
+    
+    <h1>Out-of-Sync Items</h1>
+    
+    <div class="toolbar">
+      <button id="refreshBtn" class="refresh-btn">Refresh</button>
+      <span id="lastUpdated" class="muted"></span>
+    </div>
+    
+    <div id="summary" class="summary" style="display: none;">
+      <h3>Summary</h3>
+      <p id="summaryText"></p>
+    </div>
+    
+    <div id="loading" class="loading">Loading out-of-sync items...</div>
+    <div id="error" class="error" style="display: none;"></div>
+    
+    <table id="outofsyncTable" style="display: none;">
+      <thead>
+        <tr>
+          <th>Node</th>
+          <th>Folder</th>
+          <th>File Path</th>
+          <th>Reason</th>
+          <th>Size</th>
+          <th>Modified</th>
+        </tr>
+      </thead>
+      <tbody id="outofsyncBody"></tbody>
+    </table>
+
+    <script type="module">
+      let outOfSyncData = [];
+      
+      async function fetchOutOfSyncItems() {
+        try {
+          const res = await fetch('api/outofsync');
+          if (!res.ok) throw new Error(`Failed to fetch out-of-sync items: ${res.status}`);
+          return res.json();
+        } catch (error) {
+          console.error('Error fetching out-of-sync items:', error);
+          throw error;
+        }
+      }
+      
+      function formatFileSize(bytes) {
+        if (!bytes || bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      }
+      
+      function formatDate(dateString) {
+        if (!dateString) return '—';
+        const date = new Date(dateString);
+        return date.toLocaleString();
+      }
+      
+      function getReasonClass(reason) {
+        if (!reason) return '';
+        const reasonLower = reason.toLowerCase();
+        if (reasonLower.includes('error') || reasonLower.includes('failed')) return 'status-bad';
+        if (reasonLower.includes('conflict') || reasonLower.includes('ignore')) return 'status-warning';
+        return 'status-info';
+      }
+      
+      function renderOutOfSyncItems(data) {
+        const loading = document.getElementById("loading");
+        const error = document.getElementById("error");
+        const table = document.getElementById("outofsyncTable");
+        const summary = document.getElementById("summary");
+        const tbody = document.getElementById("outofsyncBody");
+        
+        loading.style.display = "none";
+        error.style.display = "none";
+        
+        if (!data || !data.nodes || Object.keys(data.nodes).length === 0) {
+          error.textContent = "No out-of-sync items found.";
+          error.style.display = "block";
+          return;
+        }
+        
+        // Flatten all items from all nodes for summary
+        const allItems = [];
+        Object.values(data.nodes).forEach(items => {
+          allItems.push(...items);
+        });
+        
+        if (allItems.length === 0) {
+          error.textContent = "No out-of-sync items found.";
+          error.style.display = "block";
+          return;
+        }
+        
+        outOfSyncData = allItems;
+        
+        // Show summary
+        const totalItems = allItems.length;
+        const totalSize = allItems.reduce((sum, item) => sum + (item.size || 0), 0);
+        const nodes = Object.keys(data.nodes);
+        const folders = [...new Set(allItems.map(item => item.folder))];
+        
+        document.getElementById("summaryText").innerHTML = `
+          <strong>${totalItems}</strong> out-of-sync items across <strong>${nodes.length}</strong> node(s) and <strong>${folders.length}</strong> folder(s)<br>
+          Total size: <strong>${formatFileSize(totalSize)}</strong>
+        `;
+        summary.style.display = "block";
+        
+        // Clear and populate table
+        tbody.innerHTML = "";
+        
+        // Group items by node for better organization
+        nodes.forEach(nodeName => {
+          const nodeItems = data.nodes[nodeName];
+          if (nodeItems.length === 0) return;
+          
+          // Add node header row
+          const nodeHeaderRow = document.createElement("tr");
+          nodeHeaderRow.style.backgroundColor = "#f0f0f0";
+          nodeHeaderRow.style.fontWeight = "bold";
+          
+          const nodeHeaderCell = document.createElement("td");
+          nodeHeaderCell.colSpan = 6;
+          nodeHeaderCell.textContent = `Node: ${nodeName} (${nodeItems.length} items)`;
+          nodeHeaderCell.style.padding = "12px 8px";
+          nodeHeaderRow.appendChild(nodeHeaderCell);
+          tbody.appendChild(nodeHeaderRow);
+          
+          // Add items for this node
+          nodeItems.forEach(item => {
+            const tr = document.createElement("tr");
+            
+            const nodeTd = document.createElement("td");
+            nodeTd.className = "node-name";
+            nodeTd.textContent = item.node || "—";
+            tr.appendChild(nodeTd);
+            
+            const folderTd = document.createElement("td");
+            folderTd.textContent = item.folder || "—";
+            tr.appendChild(folderTd);
+            
+            const pathTd = document.createElement("td");
+            pathTd.className = "file-path";
+            pathTd.textContent = item.path || "—";
+            tr.appendChild(pathTd);
+            
+            const reasonTd = document.createElement("td");
+            reasonTd.className = `reason ${getReasonClass(item.reason)}`;
+            reasonTd.textContent = item.reason || "Unknown";
+            tr.appendChild(reasonTd);
+            
+            const sizeTd = document.createElement("td");
+            sizeTd.textContent = formatFileSize(item.size);
+            tr.appendChild(sizeTd);
+            
+            const modifiedTd = document.createElement("td");
+            modifiedTd.textContent = formatDate(item.modified);
+            tr.appendChild(modifiedTd);
+            
+            tbody.appendChild(tr);
+          });
+        });
+        
+        table.style.display = "table";
+        updateLastUpdated();
+      }
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
+        const table = document.getElementById('outofsyncTable');
+        const summary = document.getElementById('summary');
+        
+        loading.style.display = 'none';
+        table.style.display = 'none';
+        summary.style.display = 'none';
+        error.textContent = message;
+        error.style.display = 'block';
+      }
+      
+      function updateLastUpdated() {
+        const lastUpdated = document.getElementById('lastUpdated');
+        lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+      }
+      
+      async function refresh() {
+        try {
+          document.getElementById('loading').style.display = 'block';
+          document.getElementById('error').style.display = 'none';
+          document.getElementById('outofsyncTable').style.display = 'none';
+          document.getElementById('summary').style.display = 'none';
+          
+          const data = await fetchOutOfSyncItems();
+          renderOutOfSyncItems(data);
+        } catch (error) {
+          showError(`Failed to load out-of-sync items: ${error.message}`);
+        }
+      }
+      
+      // Event listeners
+      document.getElementById('refreshBtn').addEventListener('click', refresh);
+      
+      // Initial load
+      refresh();
+    </script>
+  </body>
+</html>

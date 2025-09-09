@@ -30,7 +30,7 @@
       async function load() {
         const node = qs('node');
         document.getElementById('meta').textContent = node ? `Node: ${node}` : '';
-        const res = await fetch('/api/nodes');
+        const res = await fetch('api/nodes');
         const data = await res.json();
         const target = data.nodes.find(n => n.name === node) || data.nodes[0];
         const tbody = document.getElementById('tbody');
